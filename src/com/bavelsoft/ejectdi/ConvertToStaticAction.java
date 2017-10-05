@@ -9,9 +9,6 @@ import com.intellij.psi.*;
 import java.util.Arrays;
 import java.util.Optional;
 
-/**
- * Created by dmgcodevil on 10/3/2017.
- */
 public class ConvertToStaticAction extends AnAction {
 
     @Override
