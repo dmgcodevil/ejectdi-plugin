@@ -28,11 +28,10 @@
     </extensions>
 
     <actions>
-        <action id="EjectDIPlugin.ConvertToStaticAction" class="com.bavelsoft.ejectdi.ConvertToStaticAction"
-                text="Remove Dependency Injection" description="Remove Dependency Injection">
+        <action id="EjectDIPlugin.ReplaceDIWithStatic" class="com.bavelsoft.ejectdi.ReplaceDIWithStaticAction"
+                text="Replace DI with static" description="">
             <add-to-group group-id="RefactoringMenu" relative-to-action="ConvertToInstanceMethod" anchor="after"/>
         </action>
-
     </actions>
 
 </idea-plugin>
