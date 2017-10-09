@@ -48,6 +48,10 @@ public class StatefulClass {
 }
 ```
 
+Demo
+
+![Demo](https://github.com/dmgcodevil/ejectdi-plugin/raw/master/demo.gif)
+
 TODO:
 - [ ] Enable refactoring feature for directories 
 - [ ] Add logging info to report errors during refactoring process, currently all warnings are suppressed and not visible to the user
