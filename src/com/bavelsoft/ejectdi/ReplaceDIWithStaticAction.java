@@ -1,19 +1,36 @@
 package com.bavelsoft.ejectdi;
 
-import com.intellij.find.findUsages.*;
+import com.intellij.find.findUsages.FindUsagesManager;
+import com.intellij.find.findUsages.FindUsagesOptions;
+import com.intellij.find.findUsages.JavaClassFindUsagesOptions;
+import com.intellij.find.findUsages.JavaFindUsagesHandler;
+import com.intellij.find.findUsages.JavaFindUsagesHandlerFactory;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.LangDataKeys;
-import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.JavaRecursiveElementVisitor;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
 import com.intellij.refactoring.makeStatic.MakeMethodStaticProcessor;
 import com.intellij.refactoring.makeStatic.Settings;
 import com.intellij.usages.Usage;
 import com.intellij.usages.UsageInfo2UsageAdapter;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
 
@@ -47,6 +64,20 @@ public class ReplaceDIWithStaticAction extends AnAction {
             return;
         }
         PsiClass psiClass = psiClassOpt.get();
+        if (psiClass.getAllInnerClasses().length != 0) {
+            System.out.println("WARN: classes that contain any inner classes aren't supported");
+            return;
+        }
+        if (psiClass.getConstructors().length > 1) {
+            System.out.println("WARN: classes with multiple constructors aren't supported");
+            return;
+        }
+
+        if (psiClass.getConstructors().length == 1 && psiClass.getConstructors()[0].getParameterList().getParametersCount() > 0) {
+            System.out.println("WARN: constructor has parameters");
+            return;
+        }
+
 
         boolean statelessElement = Arrays.stream(psiClass.getAllFields()).filter(psiField -> !psiField.getModifierList().hasExplicitModifier("static")).count() == 0;
 
@@ -54,7 +85,9 @@ public class ReplaceDIWithStaticAction extends AnAction {
             System.out.println("class is stateless. starting to refactoring...");
             System.out.println("converting methods to static");
             List<PsiMethod> methods = Arrays.stream(psiClass.getAllMethods())
-                    .filter(psiMethod -> !psiMethod.getModifierList().hasExplicitModifier("static") &&
+                    .filter(psiMethod -> !psiMethod.isConstructor())
+                    .filter(psiMethod -> !psiMethod.getModifierList().hasModifierProperty(PsiModifier.STATIC) &&
+                            // skip inherited methods from Object class.
                             !Object.class.getCanonicalName().equals(psiMethod.getContainingClass().getQualifiedName())
                     )
                     .collect(Collectors.toList());
@@ -71,7 +104,30 @@ public class ReplaceDIWithStaticAction extends AnAction {
             }
             findUsagesOfStatelessClassAndRemoveInstanceUsages(e, psiClass);
 
-            // todo add private constructor and make class final ?
+            psiClass.accept(new JavaRecursiveElementVisitor() {
+                @Override
+                public void visitAnnotation(PsiAnnotation annotation) {
+                    // todo use parameter for this ?
+                    if (annotation.getQualifiedName().endsWith("Singleton")) {
+                        WriteCommandAction.runWriteCommandAction(e.getProject(), () -> annotation.delete());
+                    }
+                    super.visitAnnotation(annotation);
+                }
+            });
+
+            WriteCommandAction.runWriteCommandAction(e.getProject(), () -> psiClass.getModifierList().setModifierProperty(PsiModifier.FINAL, true));
+
+            // make default constructor private
+            if (psiClass.getConstructors().length == 1) {
+                PsiMethod constructor = psiClass.getConstructors()[0];
+                WriteCommandAction.runWriteCommandAction(e.getProject(), () -> constructor.getModifierList().setModifierProperty(PsiModifier.PRIVATE, true));
+            } else {
+                WriteCommandAction.runWriteCommandAction(project, () -> {
+                    PsiMethod constructor = JavaPsiFacade.getElementFactory(project).createConstructor(psiClass.getNameIdentifier().getText());
+                    constructor.getModifierList().setModifierProperty(PsiModifier.PRIVATE, true);
+                    psiClass.add(constructor);
+                });
+            }
 
         } else {
             System.out.println("statefull.exit");
@@ -84,7 +140,7 @@ public class ReplaceDIWithStaticAction extends AnAction {
         List<Usage> usages = new ArrayList<>();
         FindUsagesOptions findUsagesOptions = new JavaClassFindUsagesOptions(e.getProject());
         JavaFindUsagesHandler javaFindUsagesHandler = new JavaFindUsagesHandler(psiClass, JavaFindUsagesHandlerFactory.getInstance(e.getProject()));
-        ProgressIndicator progressIndicator = FindUsagesManager.startProcessUsages(javaFindUsagesHandler, new PsiElement[]{psiClass}, new PsiElement[0], usage -> {
+        FindUsagesManager.startProcessUsages(javaFindUsagesHandler, new PsiElement[]{psiClass}, new PsiElement[0], usage -> {
             System.out.println("usage: " + usage.toString());
             usages.add(usage);
             return true;
@@ -92,7 +148,6 @@ public class ReplaceDIWithStaticAction extends AnAction {
             System.out.println("find usages is done");
             latch.countDown();
         });
-        progressIndicator.start();
 
         try {
             latch.await();
