@@ -104,6 +104,10 @@ public class ReplaceDIWithStaticAction extends AnAction {
     }
 
     private void refactorJavaClass(@Nonnull Project project, @Nonnull PsiFile psiFile, @Nonnull PsiClass psiClass) {
+         if(psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) {
+             LOG.warn(String.format("%s: classes should not be abstract", psiClass.getQualifiedName()));
+             return;
+         }
 
         if (psiClass.getAllInnerClasses().length != 0) {
             LOG.warn(String.format("%s: classes that contain any inner classes aren't supported.", psiClass.getQualifiedName()));
