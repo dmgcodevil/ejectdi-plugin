@@ -62,6 +62,8 @@ public class ReplaceDIWithStaticAction extends AnAction {
 
         if (selectedPSIElement instanceof PsiFile) {
             psiFiles.add((PsiFile) selectedPSIElement);
+        } else if (selectedPSIElement instanceof PsiClass) {
+            psiFiles.add(((PsiClass) selectedPSIElement).getContainingFile());
         } else if (selectedPSIElement instanceof PsiDirectory) {
             PsiDirectory psiDirectory = (PsiDirectory) selectedPSIElement;
             TreeTraverser<PsiFileSystemItem> traverser = new TreeTraverser<PsiFileSystemItem>() {
