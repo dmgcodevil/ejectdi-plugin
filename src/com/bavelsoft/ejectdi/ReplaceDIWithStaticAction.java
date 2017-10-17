@@ -11,6 +11,7 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.psi.JavaPsiFacade;
@@ -43,16 +44,18 @@ import java.util.stream.Collectors;
 
 public class ReplaceDIWithStaticAction extends AnAction {
 
+    private static final Logger LOG = Logger.getInstance(ReplaceDIWithStaticAction.class);
+
     @Override
     public void actionPerformed(AnActionEvent e) {
         Project project = e.getProject();
         if (project == null) {
-            System.out.println("ERROR: project is null");
+            LOG.error("project is null");
             return;
         }
         PsiElement selectedPSIElement = e.getData(LangDataKeys.PSI_ELEMENT);
         if (selectedPSIElement == null) {
-            System.out.println("ERROR: selected psi element is null");
+            LOG.error("selected psi element is null");
             return;
         }
         List<PsiFile> psiFiles = new ArrayList<>();
@@ -64,10 +67,10 @@ public class ReplaceDIWithStaticAction extends AnAction {
             TreeTraverser<PsiFileSystemItem> traverser = new TreeTraverser<PsiFileSystemItem>() {
                 @Override
                 public Iterable<PsiFileSystemItem> children(PsiFileSystemItem psiFileSystemItem) {
-                    if(psiFileSystemItem.isDirectory()) {
-                      return Arrays.stream(psiFileSystemItem.getChildren())
-                               .filter(element -> element instanceof PsiFileSystemItem)
-                               .map(element -> (PsiFileSystemItem)element).collect(Collectors.toList());
+                    if (psiFileSystemItem.isDirectory()) {
+                        return Arrays.stream(psiFileSystemItem.getChildren())
+                                .filter(element -> element instanceof PsiFileSystemItem)
+                                .map(element -> (PsiFileSystemItem) element).collect(Collectors.toList());
                     }
                     return Collections.emptyList();
                 }
@@ -79,7 +82,7 @@ public class ReplaceDIWithStaticAction extends AnAction {
                 }
             }
 
-            System.out.println(String.format("DEBUG: folder '%s' contains %d files", psiDirectory.getName(), psiFiles.size()));
+            LOG.debug(String.format("DEBUG: folder '%s' contains %d files", psiDirectory.getName(), psiFiles.size()));
         }
 
         List<PsiFile> javaPsiFiles = psiFiles.stream()
@@ -101,16 +104,16 @@ public class ReplaceDIWithStaticAction extends AnAction {
     private void refactorJavaClass(@Nonnull Project project, @Nonnull PsiFile psiFile, @Nonnull PsiClass psiClass) {
 
         if (psiClass.getAllInnerClasses().length != 0) {
-            System.out.println("WARN: classes that contain any inner classes aren't supported");
+            LOG.warn(String.format("%s: classes that contain any inner classes aren't supported.", psiClass.getQualifiedName()));
             return;
         }
         if (psiClass.getConstructors().length > 1) {
-            System.out.println("WARN: classes with multiple constructors aren't supported");
+            LOG.warn(String.format("%s: classes with multiple constructors aren't supported.", psiClass.getQualifiedName()));
             return;
         }
 
         if (psiClass.getConstructors().length == 1 && psiClass.getConstructors()[0].getParameterList().getParametersCount() > 0) {
-            System.out.println("WARN: constructor has parameters");
+            LOG.warn(String.format("%s: constructor has parameters", psiClass.getQualifiedName()));
             return;
         }
 
@@ -119,7 +122,7 @@ public class ReplaceDIWithStaticAction extends AnAction {
                 .filter(psiField -> !psiField.getModifierList().hasModifierProperty(PsiModifier.STATIC)).count() == 0;
 
         if (statelessElement) {
-            System.out.println("DEBUG: class is stateless. converting to static...");
+            LOG.info(String.format("%s is stateless. converting to static...", psiClass));
             List<PsiMethod> methods = Arrays.stream(psiClass.getAllMethods())
                     .filter(psiMethod -> !psiMethod.isConstructor())
                     .filter(psiMethod -> !psiMethod.getModifierList().hasModifierProperty(PsiModifier.STATIC) &&
@@ -166,8 +169,7 @@ public class ReplaceDIWithStaticAction extends AnAction {
             }
 
         } else {
-            System.out.println("statefull.exit");
-            return;
+            LOG.info(String.format("class %s is stateful. exit", psiClass.getQualifiedName()));
         }
     }
 
@@ -176,12 +178,13 @@ public class ReplaceDIWithStaticAction extends AnAction {
         List<Usage> usages = new ArrayList<>();
         FindUsagesOptions findUsagesOptions = new JavaClassFindUsagesOptions(project);
         JavaFindUsagesHandler javaFindUsagesHandler = new JavaFindUsagesHandler(psiClass, JavaFindUsagesHandlerFactory.getInstance(project));
+        String qualifiedName = psiClass.getQualifiedName();
         FindUsagesManager.startProcessUsages(javaFindUsagesHandler, new PsiElement[]{psiClass}, new PsiElement[0], usage -> {
-            System.out.println("usage: " + usage.toString());
+            LOG.debug(String.format("class: %s, usage: %s", qualifiedName, usage.toString()));
             usages.add(usage);
             return true;
         }, findUsagesOptions, () -> {
-            System.out.println("find usages is done");
+            LOG.debug(String.format("found all usages of class: %s", qualifiedName));
             latch.countDown();
         });
 
@@ -189,6 +192,7 @@ public class ReplaceDIWithStaticAction extends AnAction {
             latch.await();
             delete(project, psiClass, usages);
         } catch (InterruptedException e1) {
+            LOG.error(e1.getMessage());
             e1.printStackTrace();
         }
     }
@@ -196,7 +200,7 @@ public class ReplaceDIWithStaticAction extends AnAction {
     public void delete(Project project, PsiClass psiClass, List<Usage> usages) {
         Set<PsiElement> forDelete = usages.stream().filter(usage -> {
             if (!(usage instanceof UsageInfo2UsageAdapter)) {
-                System.out.println(String.format("usage is not supported: %s", usage));
+                LOG.warn(String.format("%s usage is not supported: %s", psiClass.getQualifiedName(), usage));
                 return false;
             }
             return true;
@@ -207,7 +211,7 @@ public class ReplaceDIWithStaticAction extends AnAction {
             if (psiElement.getContext() != null) {
                 parent = psiElement.getContext().getParent();
             } else {
-                System.out.println(String.format("WARN: context is empty for usage:%s, element: %s", usage, psiElement));
+                LOG.warn(String.format("context is empty for usage:%s, element: %s", usage, psiElement));
                 parent = psiElement.getParent().getParent();
             }
             // consider static method call on 'psiClass' should be ignored
@@ -221,7 +225,6 @@ public class ReplaceDIWithStaticAction extends AnAction {
 
 
         CustomSafeDeleteProcessor safeDeleteProcessor = CustomSafeDeleteProcessor.createInstance(project, () -> {
-                    System.out.println("Deleted !");
                 }, forDelete.toArray(new PsiElement[forDelete.size()]), false,
                 false, true);
         safeDeleteProcessor.run();
