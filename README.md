@@ -48,8 +48,12 @@ public class StatefulClass {
 }
 ```
 
+Demo
+
+![Demo](https://github.com/dmgcodevil/ejectdi-plugin/raw/master/demo.gif)
+
 TODO:
-- [ ] Enable refactoring feature for directories 
+- [x] Enable refactoring feature for directories 
 - [ ] Add logging info to report errors during refactoring process, currently all warnings are suppressed and not visible to the user
 - [ ] Add build tool  (Maven, Gradle)
 - [ ] Support recursive refactoring: A(stateful) -> B(stateful) => B(stateless) then we can try to make A stateless ?
