@@ -1,6 +1,8 @@
 package com.bavelsoft.ejectdi;
 
 import com.google.common.collect.TreeTraverser;
+import com.intellij.codeInsight.TargetElementUtil;
+import com.intellij.codeInsight.navigation.ImplementationSearcher;
 import com.intellij.find.findUsages.FindUsagesManager;
 import com.intellij.find.findUsages.FindUsagesOptions;
 import com.intellij.find.findUsages.JavaClassFindUsagesOptions;
@@ -27,6 +29,7 @@ import com.intellij.psi.PsiManager;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiMethodCallExpression;
 import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiReference;
 import com.intellij.refactoring.makeStatic.MakeMethodStaticProcessor;
 import com.intellij.refactoring.makeStatic.Settings;
 import com.intellij.usages.Usage;
@@ -104,11 +107,28 @@ public class ReplaceDIWithStaticAction extends AnAction {
     }
 
     private void refactorJavaClass(@Nonnull Project project, @Nonnull PsiFile psiFile, @Nonnull PsiClass psiClass) {
-         if(psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) {
-             LOG.warn(String.format("%s: classes should not be abstract", psiClass.getQualifiedName()));
-             return;
-         }
-
+        // todo all checks below should be configurable in modal window
+        if (psiClass.getImplementsListTypes().length > 0) {
+            LOG.warn(String.format("%s: classes should not implement any interfaces", psiClass.getQualifiedName()));
+            return;
+        }
+        if (psiClass.getExtendsListTypes().length > 0) {
+            LOG.warn(String.format("%s: classes should not extend any class", psiClass.getQualifiedName()));
+            return;
+        }
+        if (hasImplementations(psiClass)) {
+            LOG.warn(String.format("%s: class has implementations", psiClass.getQualifiedName()));
+            return;
+        }
+        if (psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) {
+            LOG.warn(String.format("%s: classes should not be abstract", psiClass.getQualifiedName()));
+            return;
+        }
+        if (psiClass.getModifierList() != null && Arrays.stream(psiClass.getModifierList().getAnnotations())
+                .map(PsiAnnotation::getQualifiedName).filter(s -> s.endsWith("Specification")).count() > 0) {
+            LOG.warn(String.format("%s: classes has specific annotation", psiClass.getQualifiedName()));
+            return;
+        }
         if (psiClass.getAllInnerClasses().length != 0) {
             LOG.warn(String.format("%s: classes that contain any inner classes aren't supported.", psiClass.getQualifiedName()));
             return;
@@ -236,5 +256,28 @@ public class ReplaceDIWithStaticAction extends AnAction {
         safeDeleteProcessor.run();
 
     }
+
+    private boolean hasImplementations(PsiClass psiClass) {
+        try {
+            PsiReference reference = psiClass.getReference();
+            final TargetElementUtil instance = TargetElementUtil.getInstance();
+            PsiElement[] targets = new ImplementationSearcher.FirstImplementationsSearcher() {
+                @Override
+                protected boolean accept(PsiElement element) {
+                    return instance.acceptImplementationForReference(reference, element);
+                }
+
+                @Override
+                protected boolean canShowPopupWithOneItem(PsiElement element) {
+                    return false;
+                }
+            }.searchImplementations(psiClass, null, false, false);
+            return targets != null && targets.length > 0;
+        } catch (Exception e) {
+            LOG.error("failed to get implementations for class: " + e.getMessage());
+        }
+        return false;
+    }
+
 
 }
